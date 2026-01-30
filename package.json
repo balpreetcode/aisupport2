@@ -1,0 +1,20 @@
+{
+  "name": "ai-support-platform",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "dev:backend": "npm run dev --workspace=@ai-support/backend",
+    "dev:frontend": "npm run dev --workspace=@ai-support/frontend",
+    "dev:widget": "npm run dev --workspace=@ai-support/widget"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  }
+}

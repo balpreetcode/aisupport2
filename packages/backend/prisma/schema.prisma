@@ -1,0 +1,385 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User roles enum
+enum UserRole {
+  admin
+  supervisor
+  agent
+}
+
+// User status enum
+enum UserStatus {
+  active
+  inactive
+}
+
+// User model
+model User {
+  id           String     @id @default(uuid())
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  name         String
+  role         UserRole   @default(agent)
+  status       UserStatus @default(active)
+  teamId       String?    @map("team_id")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  // Relations
+  team                  Team?          @relation(fields: [teamId], references: [id], onDelete: SetNull)
+  refreshTokens         RefreshToken[]
+  auditLogs             AuditLog[]     @relation("AuditLogActor")
+  assignedConversations Conversation[] @relation("ConversationAgent")
+  agentStatus           AgentStatus?
+  articles              Article[]
+  notifications         Notification[]
+
+  @@map("users")
+}
+
+// Team model
+model Team {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  deletedAt   DateTime? @map("deleted_at")
+
+  // Relations
+  users User[]
+
+  @@map("teams")
+}
+
+// Refresh token model
+model RefreshToken {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  tokenHash String   @map("token_hash")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// Audit log model
+model AuditLog {
+  id         String   @id @default(uuid())
+  action     String
+  actorId    String?  @map("actor_id")
+  targetId   String?  @map("target_id")
+  targetType String   @map("target_type")
+  details    Json     @default("{}")
+  ipAddress  String?  @map("ip_address")
+  timestamp  DateTime @default(now())
+
+  // Relations
+  actor User? @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([actorId])
+  @@index([timestamp])
+  @@map("audit_logs")
+}
+
+// Conversation status enum
+enum ConversationStatus {
+  active
+  waiting
+  resolved
+  closed
+}
+
+// Conversation channel enum
+enum ConversationChannel {
+  web_widget
+  api
+}
+
+// Message sender type enum
+enum MessageSenderType {
+  customer
+  agent
+  ai
+  system
+}
+
+// Message status enum
+enum MessageStatus {
+  sending
+  sent
+  delivered
+  read
+  failed
+}
+
+// Customer model (end users who chat)
+model Customer {
+  id         String    @id @default(uuid())
+  email      String?
+  name       String?
+  externalId String?   @map("external_id")
+  metadata   Json      @default("{}")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+  lastSeenAt DateTime? @map("last_seen_at")
+
+  // Relations
+  conversations Conversation[]
+  sessions      CustomerSession[]
+
+  @@index([email])
+  @@index([externalId])
+  @@map("customers")
+}
+
+// Customer session model
+model CustomerSession {
+  id         String   @id @default(uuid())
+  customerId String   @map("customer_id")
+  tokenHash  String   @map("token_hash")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  // Relations
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("customer_sessions")
+}
+
+// Conversation model
+model Conversation {
+  id         String             @id @default(uuid())
+  customerId String             @map("customer_id")
+  assignedTo String?            @map("assigned_to")
+  status     ConversationStatus @default(active)
+  channel    ConversationChannel @default(web_widget)
+  subject    String?
+  metadata   Json               @default("{}")
+  createdAt  DateTime           @default(now()) @map("created_at")
+  updatedAt  DateTime           @updatedAt @map("updated_at")
+  resolvedAt DateTime?          @map("resolved_at")
+
+  // Relations
+  customer   Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  agent      User?       @relation("ConversationAgent", fields: [assignedTo], references: [id], onDelete: SetNull)
+  messages   Message[]
+  queueEntry QueueEntry?
+
+  @@index([customerId])
+  @@index([assignedTo])
+  @@index([status])
+  @@map("conversations")
+}
+
+// Message model
+model Message {
+  id             String            @id @default(uuid())
+  conversationId String            @map("conversation_id")
+  senderType     MessageSenderType
+  senderId       String?           @map("sender_id")
+  content        String
+  type           String            @default("text")
+  status         MessageStatus     @default(sent)
+  quickReplies   Json?             @map("quick_replies")
+  metadata       Json              @default("{}")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId])
+  @@index([createdAt])
+  @@map("messages")
+}
+
+// Widget config model
+model WidgetConfig {
+  id             String  @id @default(uuid())
+  apiKey         String  @unique @map("api_key")
+  companyName    String  @map("company_name")
+  welcomeMessage String  @map("welcome_message")
+  primaryColor   String  @default("#6366f1") @map("primary_color")
+  headerColor    String  @default("#6366f1") @map("header_color")
+  backgroundColor String @default("#ffffff") @map("background_color")
+  position       String  @default("bottom-right")
+  offsetX        Int     @default(20) @map("offset_x")
+  offsetY        Int     @default(20) @map("offset_y")
+  logoUrl        String? @map("logo_url")
+  showBranding   Boolean @default(true) @map("show_branding")
+  enabled        Boolean @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("widget_configs")
+}
+
+// Intent model for AI classification
+model Intent {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  isActive    Boolean  @default(true) @map("is_active")
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  trainingPhrases TrainingPhrase[]
+  responses       IntentResponse[]
+
+  @@map("intents")
+}
+
+// Training phrase for intent
+model TrainingPhrase {
+  id       String @id @default(uuid())
+  intentId String @map("intent_id")
+  phrase   String
+
+  // Relations
+  intent Intent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+
+  @@index([intentId])
+  @@map("training_phrases")
+}
+
+// Response template for intent
+model IntentResponse {
+  id           String  @id @default(uuid())
+  intentId     String  @map("intent_id")
+  responseText String  @map("response_text")
+  variables    Json?
+
+  // Relations
+  intent Intent @relation(fields: [intentId], references: [id], onDelete: Cascade)
+
+  @@index([intentId])
+  @@map("intent_responses")
+}
+
+// Escalation queue priority
+enum QueuePriority {
+  low
+  medium
+  high
+  critical
+}
+
+// Escalation queue entry
+model QueueEntry {
+  id             String        @id @default(uuid())
+  conversationId String        @unique @map("conversation_id")
+  priority       QueuePriority @default(medium)
+  reason         String
+  estimatedWait  Int?          @map("estimated_wait")
+  position       Int           @default(0)
+  createdAt      DateTime      @default(now()) @map("created_at")
+  assignedAt     DateTime?     @map("assigned_at")
+
+  // Relations
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([priority])
+  @@index([createdAt])
+  @@map("queue_entries")
+}
+
+// Agent availability status
+enum AgentAvailability {
+  online
+  busy
+  away
+  offline
+}
+
+// Agent status tracking
+model AgentStatus {
+  id              String            @id @default(uuid())
+  userId          String            @unique @map("user_id")
+  availability    AgentAvailability @default(offline)
+  maxConcurrent   Int               @default(5) @map("max_concurrent")
+  currentCount    Int               @default(0) @map("current_count")
+  lastActivityAt  DateTime          @default(now()) @map("last_activity_at")
+  updatedAt       DateTime          @updatedAt @map("updated_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("agent_statuses")
+}
+
+// Knowledge base article
+model Article {
+  id          String   @id @default(uuid())
+  title       String
+  content     String
+  categoryId  String?  @map("category_id")
+  tags        String[]
+  status      String   @default("draft")
+  visibility  String   @default("internal")
+  authorId    String   @map("author_id")
+  viewCount   Int      @default(0) @map("view_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  publishedAt DateTime? @map("published_at")
+
+  // Relations
+  category ArticleCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  author   User             @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId])
+  @@index([status])
+  @@map("articles")
+}
+
+// Article category
+model ArticleCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  parentId    String?  @map("parent_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  articles Article[]
+  parent   ArticleCategory?  @relation("CategoryHierarchy", fields: [parentId], references: [id])
+  children ArticleCategory[] @relation("CategoryHierarchy")
+
+  @@map("article_categories")
+}
+
+// Notification model
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String
+  title     String
+  message   String
+  data      Json     @default("{}")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+  @@map("notifications")
+}
+
